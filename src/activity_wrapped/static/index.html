@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Activity Wrapped</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">Activity Wrapped</span>
+    <span id="who" class="who"></span>
+  </header>
+
+  <main>
+    <section id="landing" class="landing hidden">
+      <h1>Your training, wrapped.</h1>
+      <p class="lede">Pick a period, the sports and the stats you care about, and get a shareable card of your year, built on your Strava data.</p>
+      <div class="cta">
+        <a id="connect" class="btn primary" href="/auth/login">Connect with Strava</a>
+        <a class="btn" href="/demo">Try the demo</a>
+      </div>
+      <p id="not-configured" class="hint hidden">Strava credentials are not configured on this server, so only the demo is available. See the README to add yours.</p>
+    </section>
+
+    <section id="workspace" class="workspace hidden">
+      <aside class="panel">
+        <div class="group">
+          <label class="group-title" for="period">Period</label>
+          <select id="period"></select>
+        </div>
+
+        <div class="group">
+          <span class="group-title">Sports</span>
+          <div id="sports" class="chips"></div>
+        </div>
+
+        <div class="group two">
+          <div>
+            <span class="group-title">Units</span>
+            <div class="segmented" id="units">
+              <button data-value="metric" class="on">km</button>
+              <button data-value="imperial">mi</button>
+            </div>
+          </div>
+          <div>
+            <span class="group-title">Theme</span>
+            <div id="themes" class="swatches"></div>
+          </div>
+        </div>
+
+        <div class="group">
+          <span class="group-title">Show on card</span>
+          <div id="sections" class="checks"></div>
+        </div>
+
+        <div class="group">
+          <span class="group-title">Best efforts</span>
+          <p class="hint">Named PRs (5k, 10k, ...) need one API call per run, so runs are scanned on demand, fastest first, and cached.</p>
+          <button id="scan" class="btn small">Scan runs for PRs</button>
+          <p id="scan-status" class="hint"></p>
+        </div>
+
+        <div class="group actions">
+          <a id="download" class="btn primary" href="#">Download PNG</a>
+          <button id="refresh" class="btn small">Refresh data</button>
+          <button id="logout" class="btn small ghost">Disconnect</button>
+        </div>
+      </aside>
+
+      <div class="preview">
+        <div id="loading" class="loading hidden">Loading your activities…</div>
+        <img id="card" alt="Your activity wrapped card" />
+        <p id="error" class="error hidden"></p>
+      </div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

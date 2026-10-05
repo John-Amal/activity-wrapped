@@ -1,0 +1,74 @@
+:root {
+  --bg: #0b0e12; --panel: #12171d; --line: #222b35; --text: #e9eef3; --muted: #8592a3;
+  --accent: #4fd1c5; --accent-ink: #062320;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.hidden { display: none !important; }
+
+.topbar { display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 28px; border-bottom: 1px solid var(--line); }
+.brand { font-weight: 700; letter-spacing: .02em; }
+.who { color: var(--muted); font-size: 14px; }
+
+.landing { max-width: 640px; margin: 12vh auto; padding: 0 24px; text-align: center; }
+.landing h1 { font-size: 44px; margin: 0 0 12px; }
+.lede { color: var(--muted); font-size: 18px; margin: 0 0 32px; }
+.cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+.btn { display: inline-block; padding: 11px 20px; border-radius: 10px; border: 1px solid var(--line);
+  background: transparent; color: var(--text); font: inherit; font-weight: 600; cursor: pointer;
+  text-decoration: none; }
+.btn:hover { background: #1a222b; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.small { padding: 7px 14px; font-size: 14px; }
+.btn.ghost { color: var(--muted); }
+.btn:disabled { opacity: .5; cursor: wait; }
+
+.workspace { display: grid; grid-template-columns: 360px 1fr; gap: 28px; padding: 28px;
+  max-width: 1280px; margin: 0 auto; align-items: start; }
+@media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px;
+  position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow-y: auto; }
+.group { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.group:first-child { padding-top: 0; }
+.group:last-child { border-bottom: none; padding-bottom: 0; }
+.group.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.group-title { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin-bottom: 10px; }
+.hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+
+select { width: 100%; padding: 9px 10px; border-radius: 10px; background: var(--bg);
+  color: var(--text); border: 1px solid var(--line); font: inherit; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: transparent;
+  color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.chip span { color: var(--muted); margin-left: 4px; }
+.chip.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.chip.on span { color: var(--accent-ink); opacity: .7; }
+
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.segmented button { padding: 6px 14px; border: 0; background: transparent; color: var(--text);
+  font: inherit; cursor: pointer; }
+.segmented button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+
+.swatches { display: flex; gap: 8px; }
+.swatch { width: 28px; height: 28px; border-radius: 50%; background: var(--c); cursor: pointer;
+  border: 3px solid transparent; outline: 1px solid var(--line); }
+.swatch.on { border-color: var(--text); }
+
+.checks { display: grid; gap: 6px; }
+.checks label { display: flex; gap: 10px; align-items: center; cursor: pointer; font-size: 14px; }
+.checks input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.preview { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.preview img { width: 100%; max-width: 540px; border-radius: 20px; transition: opacity .15s; }
+.preview img.busy { opacity: .55; }
+.loading { color: var(--muted); padding: 40px; }
+.error { color: #f87171; }
