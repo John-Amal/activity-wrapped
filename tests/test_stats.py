@@ -98,3 +98,40 @@ def test_best_efforts_takes_fastest_and_reports_coverage(now):
     details[2] = {"id": 2, "name": "Tempo", "start_date_local": "2026-06-01T07:00:00Z",
                   "best_efforts": [{"name": "5k", "distance": 5000, "elapsed_time": 1250}]}
     assert best_efforts(details.values())[0]["activity"] == "Tempo"
+
+
+def test_pb_progression_and_personal_bests():
+    from activity_wrapped.stats import pb_progression, personal_bests
+    details = [
+        {"id": 1, "name": "A", "start_date_local": "2026-01-01T07:00:00Z",
+         "best_efforts": [{"name": "5k", "distance": 5000, "elapsed_time": 1500}]},
+        {"id": 2, "name": "B", "start_date_local": "2026-02-01T07:00:00Z",
+         "best_efforts": [{"name": "5k", "distance": 5000, "elapsed_time": 1550}]},
+        {"id": 3, "name": "C", "start_date_local": "2026-03-01T07:00:00Z",
+         "best_efforts": [{"name": "5k", "distance": 5000, "elapsed_time": 1440}]},
+    ]
+    steps = pb_progression(reversed(details))  # input order must not matter
+    assert [s["activity_id"] for s in steps["5k"]] == [1, 3]
+    (pb,) = personal_bests(details)
+    assert pb["time"] == "24:00" and pb["improvements"] == 1 and pb["first_time"] == "25:00"
+    assert pb["activity_id"] == 3
+
+
+def test_activity_detail_formats_splits_efforts_and_segments():
+    from activity_wrapped.stats import activity_detail
+    a = act(9, "2026-04-01", km=2.1, minutes=10.5, average_heartrate=150.0)
+    detail = {
+        "max_heartrate": 171, "average_cadence": 88, "calories": 200,
+        "splits_metric": [{"distance": 1000, "moving_time": 300}, {"distance": 1000, "moving_time": 290},
+                          {"distance": 100, "moving_time": 40}],
+        "best_efforts": [{"name": "1k", "elapsed_time": 285, "pr_rank": 1},
+                         {"name": "1 mile", "elapsed_time": 480, "pr_rank": None}],
+        "segment_efforts": [{"name": "Flat", "elapsed_time": 100, "distance": 400, "pr_rank": None},
+                            {"name": "Hill", "elapsed_time": 200, "distance": 600, "pr_rank": 2}],
+    }
+    d = activity_detail(a, detail, "metric")
+    assert [s["pace"] for s in d["splits"]] == ["5:00 /km", "4:50 /km"]  # 100 m fragment dropped
+    assert {e["label"]: e["value"] for e in d["extras"]}["cadence"] == "176 spm"
+    assert d["best_efforts"][0]["badge"] == "PR"
+    assert [s["name"] for s in d["segments"]] == ["Hill", "Flat"]  # ranked efforts first
+    assert activity_detail(a, None)["details_loaded"] is False

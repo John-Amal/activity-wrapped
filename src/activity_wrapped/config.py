@@ -17,6 +17,7 @@ class Settings:
     cache_dir: Path
     cookie_secure: bool
     max_pages: int
+    map_tiles: bool
 
     @property
     def redirect_uri(self) -> str:
@@ -37,4 +38,6 @@ def get_settings() -> Settings:
         cookie_secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
         # 200 activities per page; 50 pages covers 10,000 activities.
         max_pages=int(os.getenv("MAX_PAGES", "50")),
+        # Set to false to remove map backgrounds (and all tile requests) entirely.
+        map_tiles=os.getenv("MAP_TILES", "true").lower() == "true",
     )

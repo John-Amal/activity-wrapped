@@ -13,7 +13,9 @@ import io
 from functools import cache
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageColor, ImageDraw, ImageFont
+
+from .tiles import basemap, fit_viewport
 
 FONT_DIR = Path(__file__).parent / "fonts"
 
@@ -23,6 +25,7 @@ SECTIONS = [
     {"key": "by_sport", "label": "Breakdown by sport", "default": True},
     {"key": "series", "label": "Distance by month / year (chart)", "default": True},
     {"key": "best_efforts", "label": "Best efforts (named PRs)", "default": True},
+    {"key": "routes", "label": "Route map (all routes, main area)", "default": False},
     {"key": "pace", "label": "Average pace / speed (main sport)", "default": False},
     {"key": "eddington", "label": "Eddington number", "default": True},
     {"key": "streak", "label": "Longest streak", "default": False},
@@ -76,8 +79,11 @@ def fit(draw: ImageDraw.ImageDraw, text: str, f, max_w: float) -> str:
 
 
 class Builder:
-    def __init__(self, theme: dict) -> None:
+    def __init__(self, theme: dict, routes=None, map_style: str = "none") -> None:
         self.t = theme
+        self.routes = routes or {}
+        self.map_style = map_style
+        self.img: Image.Image | None = None  # set by _compose before sections draw
         self.blocks: list[tuple[int, callable]] = []
 
     def add(self, height: int, fn) -> None:
@@ -108,14 +114,16 @@ class Builder:
             vf = font("Bold", 40 if n < 3 else 36)
             d.text((x0 + 28, y + 62), fit(d, value, vf, bw - 56), font=vf, fill=self.t["text"])
 
-    def rows(self, d, y, rows, right_accent=False):
+    def rows(self, d, y, rows, right_accent=False, middle_accent=False):
         f, fb = font("Regular", 32), font("Bold", 32)
         for left, middle, right in rows:
             rw = d.textlength(right, font=fb if right_accent else f)
             mw = d.textlength(middle, font=f) if middle else 0
             d.text((PAD, y), fit(d, left, f, CW - rw - mw - 60), font=f, fill=self.t["text"])
             if middle:
-                d.text((W - PAD - rw - 32 - mw, y), middle, font=f, fill=self.t["muted"])
+                d.text((W - PAD - rw - 32 - mw, y + (3 if middle_accent else 0)), middle,
+                       font=font("Bold", 28) if middle_accent else f,
+                       fill=self.t["accent"] if middle_accent else self.t["muted"])
             d.text((W - PAD - rw, y), right, font=fb if right_accent else f,
                    fill=self.t["accent"] if right_accent else self.t["muted"])
             y += 56
@@ -272,21 +280,143 @@ def s_repeated_name(b, s):
         _line(b, "go-to activity name", f"\u201c{r['name']}\u201d \u00d7 {r['count']}")
 
 
+# The largest map scale used: about zoom 18 on standard tiles. A short run
+# shouldn't be blown up into a handful of blurry street corners.
+MAX_MAP_SCALE = 256 * 2 ** 18
+
+
+def _rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, size[0] - 1, size[1] - 1], radius=radius, fill=255)
+    return mask
+
+
+def draw_map(b: Builder, d, routes, box, *, width: int, alpha: int, markers: bool = False) -> None:
+    """Draw routes into box, on a tile map when one is selected and available,
+    otherwise on a plain panel. With alpha < 255, overlapping routes build up
+    brightness, so frequently used roads stand out like a heatmap."""
+    x0, y0, x1, y1 = (int(v) for v in box)
+    t = b.t
+    vp = fit_viewport(routes, (x0, y0, x1, y1), max_scale=MAX_MAP_SCALE)
+    tiles = basemap(vp, b.map_style) if b.map_style != "none" else None
+    if tiles:
+        img, attribution = tiles
+        b.img.paste(img, (x0, y0), _rounded_mask(img.size, 22))
+    else:
+        d.rounded_rectangle([x0, y0, x1, y1], radius=22, fill=t["box"])
+
+    lines = [[vp(*p) for p in r] for r in routes]
+    rgb = ImageColor.getrgb(t["accent"])
+    if tiles:
+        halo = (20, 20, 20, 170) if b.map_style == "dark" else (255, 255, 255, 210)
+        for line in lines:
+            if len(line) >= 2:
+                d.line(line, fill=halo, width=width + 6, joint="curve")
+        alpha = min(255, int(alpha * 1.6))
+    for line in lines:
+        if len(line) >= 2:
+            d.line(line, fill=(*rgb, alpha), width=width, joint="curve")
+    if markers and lines and len(lines[0]) >= 2:
+        for (x, y), fill in ((lines[0][0], t["text"]), (lines[0][-1], t["accent"])):
+            d.ellipse([x - 13, y - 13, x + 13, y + 13], fill=fill, outline=t["marker_ring"], width=5)
+    if tiles:
+        f = font("Regular", 18)
+        tw = d.textlength(attribution, font=f)
+        d.rounded_rectangle([x1 - tw - 28, y1 - 40, x1 - 8, y1 - 8], radius=8, fill=(255, 255, 255, 200))
+        d.text((x1 - tw - 18, y1 - 37), attribution, font=f, fill=(40, 40, 40))
+
+
+def s_routes(b, s):
+    info = b.routes
+    routes = info.get("routes") or []
+    if not routes:
+        return
+    box_h = int(CW * 0.78)
+
+    def fn(d, y):
+        b.label(d, y, "where you went")
+        if info.get("shown", 0) < info.get("total", 0):
+            note = f"{info['shown']} of {info['total']} routes \u00b7 main area"
+            nw = d.textlength(note, font=font("Regular", 24))
+            d.text((W - PAD - nw, y), note, font=font("Regular", 24), fill=b.t["muted"])
+        top = y + 52
+        alpha = max(40, min(200, int(2600 / max(len(routes), 1))))
+        draw_map(b, d, routes, (PAD, top, W - PAD, top + box_h), width=4, alpha=alpha)
+    b.add(52 + box_h, fn)
+
+
 RENDERERS = {
     "headline": s_headline, "totals": s_totals, "pace": s_pace, "by_sport": s_by_sport,
-    "series": s_series, "best_efforts": s_best_efforts, "eddington": s_eddington,
+    "series": s_series, "routes": s_routes, "best_efforts": s_best_efforts, "eddington": s_eddington,
     "streak": s_streak, "habits": s_habits, "longest": s_longest, "climb": s_climb,
     "achievements": s_achievements, "busiest_month": s_busiest_month,
     "repeated_name": s_repeated_name,
 }
 
 
+def theme_for(theme: str, background: str) -> dict:
+    """Theme colours, adapted for a transparent card: no card or page fill,
+    and panels and lines become translucent so the photo underneath shows
+    through. Light-text themes suit dark photos; Paper suits light ones."""
+    t = dict(THEMES.get(theme, THEMES["midnight"]))
+    t["marker_ring"] = t["card"]
+    if background == "transparent":
+        t["box"] = (*ImageColor.getrgb(t["box"]), 120)
+        t["border"] = (*ImageColor.getrgb(t["border"]), 170)
+        t["marker_ring"] = t["box"][:3]
+        t["transparent"] = True
+    return t
+
+
+def _compose(t: dict, b: Builder, kicker: str, title: str, aside: str, footer_left: str,
+             footer_right: str) -> bytes:
+    header_h, footer_h = 210, 120
+    H = MARGIN + header_h + b.height + footer_h + MARGIN
+    if t.get("transparent"):
+        img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    else:
+        img = Image.new("RGB", (W, H), t["bg"])
+    b.img = img
+    d = ImageDraw.Draw(img, "RGBA")
+    if not t.get("transparent"):
+        d.rounded_rectangle([MARGIN, MARGIN, W - MARGIN, H - MARGIN], radius=40, fill=t["card"],
+                            outline=t["border"], width=2)
+
+    y = MARGIN + 64
+    d.text((PAD, y), fit(d, kicker.upper(), font("Bold", 26), CW * 0.6), font=font("Bold", 26),
+           fill=t["accent"])
+    d.text((PAD, y + 40), fit(d, title, font("Bold", 52), CW), font=font("Bold", 52), fill=t["text"])
+    if aside:
+        al = fit(d, aside, font("Medium", 26), CW * 0.4)
+        aw = d.textlength(al, font=font("Medium", 26))
+        d.text((W - PAD - aw, y + 4), al, font=font("Medium", 26), fill=t["muted"])
+
+    y = MARGIN + header_h
+    for h, fn in b.blocks:
+        fn(d, y)
+        y += h
+
+    fy = H - MARGIN - footer_h + 36
+    d.line([(PAD, fy), (W - PAD, fy)], fill=t["border"], width=2)
+    d.text((PAD, fy + 28), fit(d, footer_left or "", font("Medium", 26), CW / 2),
+           font=font("Medium", 26), fill=t["muted"])
+    rw = d.textlength(footer_right, font=font("Medium", 26))
+    d.text((W - PAD - rw, fy + 28), footer_right, font=font("Medium", 26), fill=t["muted"])
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
 def render_card(stats: dict, sections: list[str] | None = None, theme: str = "midnight",
-                athlete: str = "") -> bytes:
-    t = THEMES.get(theme, THEMES["midnight"])
+                athlete: str = "", routes: dict | None = None, map_style: str = "none",
+                background: str = "solid") -> bytes:
+    """The wrapped card. `routes` is {"routes": [[(lat, lon), ...]], "shown": n,
+    "total": m}, already privacy-trimmed by the caller."""
+    t = theme_for(theme, background)
     chosen = [k for k in SECTION_KEYS if k in (sections or DEFAULT_SECTIONS)]
 
-    b = Builder(t)
+    b = Builder(t, routes, map_style)
     if stats.get("empty"):
         b.add(120, lambda d, y: d.text((PAD, y + 40), "No activities match these filters.",
                                        font=font("Regular", 32), fill=t["muted"]))
@@ -296,38 +426,101 @@ def render_card(stats: dict, sections: list[str] | None = None, theme: str = "mi
         if not b.blocks:
             b.add(80, lambda d, y: d.text((PAD, y + 20), "Pick at least one section.",
                                           font=font("Regular", 32), fill=t["muted"]))
+    return _compose(t, b, "Activity Wrapped", stats["period_label"].capitalize(),
+                    stats["sports_label"] if stats.get("sports") else "", athlete,
+                    f"{stats.get('count', 0):,} activities \u00b7 data from Strava")
 
-    header_h, footer_h = 210, 120
-    H = MARGIN + header_h + b.height + footer_h + MARGIN
-    img = Image.new("RGB", (W, H), t["bg"])
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle([MARGIN, MARGIN, W - MARGIN, H - MARGIN], radius=40, fill=t["card"],
-                        outline=t["border"], width=2)
 
-    # header
-    y = MARGIN + 64
-    d.text((PAD, y), "ACTIVITY WRAPPED", font=font("Bold", 26), fill=t["accent"])
-    d.text((PAD, y + 40), stats["period_label"].capitalize(), font=font("Bold", 52), fill=t["text"])
-    if stats.get("sports"):
-        sl = fit(d, stats["sports_label"], font("Medium", 26), CW / 2)
-        sw = d.textlength(sl, font=font("Medium", 26))
-        d.text((W - PAD - sw, y + 4), sl, font=font("Medium", 26), fill=t["muted"])
+# ---------------------------------------------------------------------------
+# Single-activity card
+# ---------------------------------------------------------------------------
+def a_map(b, a, route):
+    if len(route) < 2:
+        return
+    box_h = int(CW * 0.72)
 
-    # body
-    y = MARGIN + header_h
-    for h, fn in b.blocks:
-        fn(d, y)
-        y += h
+    def fn(d, y):
+        draw_map(b, d, [route], (PAD, y, W - PAD, y + box_h), width=9, alpha=255, markers=True)
+    b.add(box_h, fn)
 
-    # footer
-    fy = H - MARGIN - footer_h + 36
-    d.line([(PAD, fy), (W - PAD, fy)], fill=t["border"], width=2)
-    left = fit(d, athlete or "", font("Medium", 26), CW / 2)
-    d.text((PAD, fy + 28), left, font=font("Medium", 26), fill=t["muted"])
-    right = f"{stats.get('count', 0):,} activities \u00b7 data from Strava"
-    rw = d.textlength(right, font=font("Medium", 26))
-    d.text((W - PAD - rw, fy + 28), right, font=font("Medium", 26), fill=t["muted"])
 
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
+def a_stats(b, a):
+    first = [("distance", a["distance"]), ("moving time", a["moving_time"])]
+    if a.get("pace"):
+        first.append(("pace" if "/" in a["pace"] and "/h" not in a["pace"] else "speed", a["pace"]))
+    second = [("elevation", a["elevation"])] + [(e["label"], e["value"]) for e in a["extras"][:2]]
+    rest = [(e["label"], e["value"]) for e in a["extras"][2:]]
+
+    def fn(d, y):
+        b.boxes(d, y, first)
+        b.boxes(d, y + 136 + GAP, second)
+        if rest:
+            b.boxes(d, y + 2 * (136 + GAP), rest)
+    b.add(136 * (3 if rest else 2) + GAP * (2 if rest else 1), fn)
+
+
+def a_splits(b, a, unit_label):
+    splits = a.get("splits") or []
+    if len(splits) < 2:
+        return
+    chart_h = 200
+
+    def fn(d, y):
+        b.label(d, y, f"splits per {unit_label}")
+        top = y + 84
+        speeds = [sp["speed"] for sp in splits]
+        lo, hi = min(speeds) * 0.9, max(speeds)
+        fastest = speeds.index(hi)
+        n = len(splits)
+        slot = CW / n
+        bw = max(4, slot * 0.66)
+        every = 1 if n <= 15 else 5
+        for i, sp in enumerate(splits):
+            x0 = PAD + i * slot + (slot - bw) / 2
+            h = max(6, chart_h * (sp["speed"] - lo) / max(hi - lo, 1e-9))
+            d.rounded_rectangle([x0, top + chart_h - h, x0 + bw, top + chart_h], radius=min(8, bw / 2),
+                                fill=b.t["bar"] if i == fastest else b.t["border"])
+            if (i + 1) % every == 0 or i == 0:
+                lab = str(sp["index"])
+                lw = d.textlength(lab, font=font("Medium", 22))
+                d.text((x0 + bw / 2 - lw / 2, top + chart_h + 12), lab, font=font("Medium", 22),
+                       fill=b.t["muted"])
+        txt = f"fastest {splits[fastest]['pace']}"
+        f = font("Bold", 26)
+        tw = d.textlength(txt, font=f)
+        px = min(max(PAD + fastest * slot + slot / 2 - tw / 2, PAD), W - PAD - tw)
+        d.text((px, top - 42), txt, font=f, fill=b.t["text"])
+    b.add(84 + chart_h + 48, fn)
+
+
+def a_rows(b, label, items, limit):
+    items = items[:limit]
+    if not items:
+        return
+
+    def fn(d, y):
+        b.label(d, y, label)
+        b.rows(d, y + 52, [(it["name"], it.get("badge") or "", it["time"]) for it in items],
+               right_accent=True, middle_accent=True)
+    b.add(52 + 56 * len(items) - 14, fn)
+
+
+def render_activity_card(a: dict, route: list, theme: str = "midnight", athlete: str = "",
+                         units: str = "metric", map_style: str = "none",
+                         background: str = "solid") -> bytes:
+    t = theme_for(theme, background)
+    b = Builder(t, map_style=map_style)
+    a_map(b, a, route)
+    a_stats(b, a)
+    a_splits(b, a, "km" if units == "metric" else "mile")
+    efforts = a.get("best_efforts") or []
+    # Up to eight efforts in distance order: every PR-ranked one first, then
+    # the standard race distances, then whatever else fits.
+    def priority(i):
+        e = efforts[i]
+        return (e.get("badge") is None, e["name"] not in PREFERRED_EFFORTS, i)
+    keep = sorted(range(len(efforts)), key=priority)[:8]
+    a_rows(b, "best efforts", [efforts[i] for i in sorted(keep)], 8)
+    a_rows(b, "segments", a.get("segments") or [], 6)
+    return _compose(t, b, f"{a['sport_label']} \u00b7 {a['date']}", a["name"], "", athlete,
+                    "data from Strava")

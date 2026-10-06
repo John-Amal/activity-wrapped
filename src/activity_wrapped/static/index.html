@@ -20,22 +20,23 @@
         <a id="connect" class="btn primary" href="/auth/login">Connect with Strava</a>
         <a class="btn" href="/demo">Try the demo</a>
       </div>
+      <p id="landing-error" class="error hidden"></p>
       <p id="not-configured" class="hint hidden">Strava credentials are not configured on this server, so only the demo is available. See the README to add yours.</p>
     </section>
 
     <section id="workspace" class="workspace hidden">
       <aside class="panel">
-        <div class="group">
+        <div data-tab-hide="training" class="group">
           <label class="group-title" for="period">Period</label>
           <select id="period"></select>
         </div>
 
-        <div class="group">
+        <div data-tab-hide="training" class="group">
           <span class="group-title">Sports</span>
           <div id="sports" class="chips"></div>
         </div>
 
-        <div class="group two">
+        <div data-tab-hide="training" class="group two">
           <div>
             <span class="group-title">Units</span>
             <div class="segmented" id="units">
@@ -49,12 +50,34 @@
           </div>
         </div>
 
-        <div class="group">
+        <div data-tab-hide="training" class="group two">
+          <div>
+            <label class="group-title" for="map">Map background</label>
+            <select id="map"></select>
+          </div>
+          <div>
+            <span class="group-title">Card background</span>
+            <div class="segmented" id="bg">
+              <button data-value="solid" class="on">Solid</button>
+              <button data-value="transparent">Clear</button>
+            </div>
+          </div>
+        </div>
+        <p id="map-hint" data-tab-hide="training" class="hint hidden">With a street map, the area around your start becomes recognisable. Consider hiding 500 m or more.</p>
+        <p id="bg-hint" data-tab-hide="training" class="hint hidden">Clear cards are transparent PNGs for laying over a photo. Light-text themes suit dark photos; Paper suits light ones.</p>
+
+        <div data-tab-hide="training" class="group">
+          <label class="group-title" for="privacy">Map privacy</label>
+          <select id="privacy"></select>
+          <p class="hint">Hides the start and end of every route, which is usually home. The combined route map always hides at least 1 km unless privacy is off.</p>
+        </div>
+
+        <div class="group" data-tab-only="card">
           <span class="group-title">Show on card</span>
           <div id="sections" class="checks"></div>
         </div>
 
-        <div class="group">
+        <div class="group" data-tab-only="card bests training">
           <span class="group-title">Best efforts</span>
           <p class="hint">Named PRs (5k, 10k, ...) need one API call per run, so runs are scanned on demand, fastest first, and cached.</p>
           <button id="scan" class="btn small">Scan runs for PRs</button>
@@ -62,19 +85,131 @@
         </div>
 
         <div class="group actions">
-          <a id="download" class="btn primary" href="#">Download PNG</a>
           <button id="refresh" class="btn small">Refresh data</button>
           <button id="logout" class="btn small ghost">Disconnect</button>
         </div>
       </aside>
 
-      <div class="preview">
-        <div id="loading" class="loading hidden">Loading your activities…</div>
-        <img id="card" alt="Your activity wrapped card" />
+      <div class="main">
+        <nav class="tabs" role="tablist">
+          <button data-tab="card" class="on" role="tab">Wrapped card</button>
+          <button data-tab="activities" role="tab">Activities</button>
+          <button data-tab="bests" role="tab">Personal bests</button>
+          <button data-tab="training" role="tab">Training</button>
+        </nav>
         <p id="error" class="error hidden"></p>
+        <div id="loading" class="loading hidden">Loading your activities…</div>
+
+        <div id="tab-card" class="tab preview">
+          <img id="card" alt="Your activity wrapped card" />
+          <a id="download" class="btn primary" href="#">Download PNG</a>
+        </div>
+
+        <div id="tab-activities" class="tab hidden">
+          <div id="activity-list-view">
+            <div class="toolbar">
+              <input id="search" type="search" placeholder="Search by name" />
+              <select id="sort">
+                <option value="date">Newest</option>
+                <option value="distance">Longest</option>
+                <option value="time">Most time</option>
+                <option value="elevation">Most climbing</option>
+              </select>
+            </div>
+            <p id="activity-count" class="hint"></p>
+            <ul id="activity-list" class="activity-list"></ul>
+            <button id="more" class="btn small hidden">Load more</button>
+          </div>
+          <div id="activity-detail-view" class="preview hidden">
+            <div class="detail-actions">
+              <button id="back" class="btn small">&larr; All activities</button>
+              <a id="activity-download" class="btn small primary" href="#">Download PNG</a>
+            </div>
+            <p id="activity-warning" class="hint hidden"></p>
+            <img id="activity-card" alt="Activity card" />
+          </div>
+        </div>
+
+        <div id="tab-bests" class="tab hidden">
+          <p id="bests-status" class="hint"></p>
+          <table class="bests">
+            <thead><tr><th>Distance</th><th>Best</th><th>Date</th><th>Activity</th><th>Progress</th></tr></thead>
+            <tbody id="bests-body"></tbody>
+          </table>
+        </div>
+
+        <div id="tab-training" class="tab hidden">
+          <div class="toolbar">
+            <select id="t-group">
+              <option value="run">Running</option>
+              <option value="ride">Cycling</option>
+              <option value="swim">Swimming</option>
+              <option value="hike">Hiking &amp; walking</option>
+              <option value="all">All activities</option>
+            </select>
+          </div>
+          <p id="t-status" class="hint"></p>
+          <div id="t-kpis" class="kpis"></div>
+
+          <h3 class="section">Insights</h3>
+          <div id="t-findings" class="findings"></div>
+
+          <div id="t-predictions-wrap" class="hidden">
+            <h3 class="section">Race predictions</h3>
+            <table class="bests">
+              <thead><tr><th>Distance</th><th>Predicted</th><th>Range</th><th>Pace</th><th>Your best</th></tr></thead>
+              <tbody id="t-predictions"></tbody>
+            </table>
+            <p class="hint">From your three strongest runs or best efforts of the last 120 days, via Riegel's formula. Scan runs for PRs to include your best efforts.</p>
+          </div>
+
+          <div id="t-zones-wrap" class="hidden">
+            <h3 class="section">Your pace zones</h3>
+            <div id="t-zones" class="zones"></div>
+          </div>
+
+          <h3 class="section">Charts</h3>
+          <div class="charts">
+            <figure><figcaption>Weekly volume and load</figcaption><canvas id="c-weekly"></canvas></figure>
+            <figure><figcaption>Fitness, fatigue and form</figcaption><canvas id="c-fitness"></canvas></figure>
+            <figure id="f-performance"><figcaption id="c-performance-title">Performance</figcaption><canvas id="c-performance"></canvas></figure>
+            <figure><figcaption>Time by intensity (hours per month)</figcaption><canvas id="c-intensity"></canvas></figure>
+            <figure id="f-efficiency"><figcaption>Aerobic efficiency on easy runs (higher is fitter)</figcaption><canvas id="c-efficiency"></canvas></figure>
+          </div>
+
+          <h3 class="section">Training plan</h3>
+          <div class="plan-form">
+            <label>Goal
+              <select id="p-goal">
+                <option value="faster">Get faster</option>
+                <option value="endurance">Build endurance</option>
+                <option value="maintain">Maintain fitness</option>
+              </select>
+            </label>
+            <label id="p-target-wrap">Target
+              <select id="p-target">
+                <option>5k</option><option selected>10k</option><option>Half marathon</option><option>Marathon</option>
+              </select>
+            </label>
+            <label>Weeks <input id="p-weeks" type="number" min="2" max="20" value="8" /></label>
+            <label>Days a week <input id="p-days" type="number" min="2" max="7" value="4" /></label>
+            <label>Race date (optional) <input id="p-race" type="date" /></label>
+            <button id="p-build" class="btn primary">Build plan</button>
+          </div>
+          <div id="t-plan" class="hidden">
+            <div id="p-projection"></div>
+            <figure id="f-projection"><figcaption id="c-projection-title">Projection</figcaption><canvas id="c-projection"></canvas></figure>
+            <ul id="p-notes" class="notes"></ul>
+            <div id="p-weeks-list"></div>
+            <a id="p-ics" class="btn small" href="#">Add to calendar (.ics)</a>
+          </div>
+          <p class="hint disclaimer">Training guidance from your own data and standard sports-science models. It isn't medical advice: pain, illness or unusual fatigue always overrides a plan.</p>
+        </div>
       </div>
     </section>
   </main>
+  <script src="vendor/chart.umd.min.js"></script>
   <script src="app.js"></script>
+  <script src="training.js"></script>
 </body>
 </html>

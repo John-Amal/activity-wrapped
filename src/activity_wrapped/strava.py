@@ -25,6 +25,8 @@ AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
 TOKEN_URL = "https://www.strava.com/oauth/token"
 SCOPE = "read,activity:read_all"
 PAGE_SIZE = 200
+# Bump when trim_detail() keeps new fields, so older cache files are refetched.
+CACHE_VERSION = 2
 
 
 class StravaAPIError(RuntimeError):
@@ -173,13 +175,13 @@ class StravaClient:
 
     def _cache_path(self, activity_id: int) -> Path:
         owner = str(self.athlete_id or "unknown")
-        return self._settings.cache_dir / "details" / owner / f"{activity_id}.json"
+        return self._settings.cache_dir / f"details-v{CACHE_VERSION}" / owner / f"{activity_id}.json"
 
     def get_activity_details(self, activity_id: int) -> dict:
         path = self._cache_path(activity_id)
         if path.exists():
             return json.loads(path.read_text())
-        detail = self._get(f"/activities/{activity_id}", {"include_all_efforts": "false"})
+        detail = self._get(f"/activities/{activity_id}", {"include_all_efforts": "true"})
         trimmed = trim_detail(detail)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(trimmed))
@@ -189,13 +191,24 @@ class StravaClient:
         return self._cache_path(activity_id).exists()
 
 
+def _split(sp: dict) -> dict:
+    return {k: sp.get(k) for k in ("distance", "moving_time", "elapsed_time",
+                                   "elevation_difference", "average_heartrate")}
+
+
 def trim_detail(detail: dict) -> dict:
-    """Keep only what the app uses, so the on-disk cache holds no GPS
-    polylines, gear, photos or other personal detail."""
+    """Keep only what the app uses. The on-disk cache holds no GPS data,
+    gear, photos or descriptions: maps are drawn from the summary polyline
+    that comes with the activity list, which is never written to disk."""
     return {
         "id": detail.get("id"),
         "name": detail.get("name"),
         "start_date_local": detail.get("start_date_local"),
+        "average_heartrate": detail.get("average_heartrate"),
+        "max_heartrate": detail.get("max_heartrate"),
+        "average_watts": detail.get("average_watts"),
+        "average_cadence": detail.get("average_cadence"),
+        "calories": detail.get("calories"),
         "best_efforts": [
             {
                 "name": e.get("name"),
@@ -205,4 +218,17 @@ def trim_detail(detail: dict) -> dict:
             }
             for e in detail.get("best_efforts") or []
         ],
+        "segment_efforts": [
+            {
+                "name": e.get("name") or (e.get("segment") or {}).get("name"),
+                "distance": e.get("distance"),
+                "elapsed_time": e.get("elapsed_time"),
+                "pr_rank": e.get("pr_rank"),
+                "kom_rank": e.get("kom_rank"),
+                "average_grade": (e.get("segment") or {}).get("average_grade"),
+            }
+            for e in detail.get("segment_efforts") or []
+        ],
+        "splits_metric": [_split(sp) for sp in detail.get("splits_metric") or []],
+        "splits_standard": [_split(sp) for sp in detail.get("splits_standard") or []],
     }

@@ -267,10 +267,132 @@ def best_efforts(details: Iterable[dict]) -> list[dict]:
                     "seconds": t,
                     "time": fmt_clock(t),
                     "activity": truncate(d.get("name") or "", 28),
+                    "activity_id": d.get("id"),
                     "date": _fmt_date(local_start(d)),
                     "all_time_pr": e.get("pr_rank") == 1,
                 }
     return sorted(best.values(), key=lambda x: x["distance_m"])
+
+
+def pb_progression(details: Iterable[dict]) -> dict[str, list[dict]]:
+    """For each best-effort distance, every effort that beat the previous
+    best, in date order. The last entry is the current personal best."""
+    events = []
+    for d in details:
+        dt = local_start(d)
+        for e in d.get("best_efforts") or []:
+            if e.get("name") and e.get("elapsed_time") and dt:
+                events.append((dt, e, d))
+    events.sort(key=lambda x: x[0])
+    progress: dict[str, list[dict]] = {}
+    for dt, e, d in events:
+        steps = progress.setdefault(e["name"], [])
+        if not steps or e["elapsed_time"] < steps[-1]["seconds"]:
+            steps.append({"seconds": e["elapsed_time"], "time": fmt_clock(e["elapsed_time"]),
+                          "date": _fmt_date(dt), "activity_id": d.get("id"),
+                          "activity": truncate(d.get("name") or "", 28)})
+    return progress
+
+
+def personal_bests(details: Iterable[dict]) -> list[dict]:
+    """Current best per distance plus how it got there."""
+    details = list(details)
+    progression = pb_progression(details)
+    out = []
+    for pb in best_efforts(details):
+        steps = progression.get(pb["name"], [])
+        first = steps[0] if steps else None
+        out.append(pb | {
+            "improvements": max(0, len(steps) - 1),
+            "first_time": first["time"] if first else pb["time"],
+            "first_date": first["date"] if first else pb["date"],
+            "progression": steps,
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Individual activities
+# ---------------------------------------------------------------------------
+PR_BADGE = {1: "PR", 2: "2nd", 3: "3rd"}
+
+
+def activity_summary(a: dict, units: str = "metric") -> dict:
+    u = UNITS[units]
+    sport = sport_of(a)
+    return {
+        "id": a.get("id"),
+        "name": a.get("name") or "",
+        "date": _fmt_date(local_start(a)),
+        "start": a.get("start_date_local", "")[:16].replace("T", " "),
+        "sport": sport,
+        "sport_label": sport_label(sport),
+        "distance": f"{a.get('distance', 0) / u['dist_m']:.2f} {u['dist']}",
+        "moving_time": fmt_clock(a.get("moving_time", 0)),
+        "pace": pace_or_speed(sport, a.get("distance", 0), a.get("moving_time", 0), units),
+        "elevation": f"{fmt_number(a.get('total_elevation_gain', 0) / u['elev_m'])} {u['elev']}",
+        "has_map": bool((a.get("map") or {}).get("summary_polyline")),
+        "achievements": a.get("achievement_count", 0) or 0,
+    }
+
+
+def activity_detail(a: dict, detail: dict | None, units: str = "metric") -> dict:
+    """Everything shown for one activity. `a` is the summary from the list,
+    `detail` the trimmed detail record (None if it hasn't been fetched)."""
+    out = activity_summary(a, units)
+    detail = detail or {}
+    sport = sport_of(a)
+    u = UNITS[units]
+
+    def present(v):
+        return v is not None and v != 0
+
+    extras = []
+    if present(detail.get("average_heartrate") or a.get("average_heartrate")):
+        hr = detail.get("average_heartrate") or a.get("average_heartrate")
+        mx = detail.get("max_heartrate")
+        extras.append(("avg / max hr" if mx else "avg heart rate",
+                       f"{hr:.0f} / {mx:.0f}" if mx else f"{hr:.0f} bpm"))
+    if present(detail.get("average_watts")):
+        extras.append(("avg power", f"{detail['average_watts']:.0f} W"))
+    if present(detail.get("average_cadence")):
+        # Strava reports running cadence per leg; double it for steps per minute.
+        cad = detail["average_cadence"] * (2 if sport in PACE_SPORTS else 1)
+        extras.append(("cadence", f"{cad:.0f} {'spm' if sport in PACE_SPORTS else 'rpm'}"))
+    if present(detail.get("calories")):
+        extras.append(("calories", f"{detail['calories']:,.0f} kcal"))
+    out["extras"] = [{"label": k, "value": v} for k, v in extras]
+
+    split_key = "splits_metric" if units == "metric" else "splits_standard"
+    splits = []
+    for i, sp in enumerate(detail.get(split_key) or [], start=1):
+        d, t = sp.get("distance") or 0, sp.get("moving_time") or 0
+        if d < 0.2 * u["dist_m"] or t <= 0:  # skip a tiny final fragment
+            continue
+        splits.append({"index": i, "pace": pace_or_speed(sport, d, t, units),
+                       "speed": d / t, "partial": d < 0.95 * u["dist_m"]})
+    out["splits"] = splits
+
+    out["best_efforts"] = [
+        {"name": e["name"], "time": fmt_clock(e["elapsed_time"]),
+         "badge": PR_BADGE.get(e.get("pr_rank"))}
+        for e in detail.get("best_efforts") or [] if e.get("name") and e.get("elapsed_time")
+    ]
+    segs = []
+    for e in detail.get("segment_efforts") or []:
+        if not e.get("name") or not e.get("elapsed_time"):
+            continue
+        badge = PR_BADGE.get(e.get("pr_rank"))
+        if e.get("kom_rank"):
+            badge = f"Top {e['kom_rank']}"
+        segs.append({"name": truncate(e["name"], 34), "time": fmt_clock(e["elapsed_time"]),
+                     "distance": f"{(e.get('distance') or 0) / u['dist_m']:.2f} {u['dist']}",
+                     "grade": e.get("average_grade"), "badge": badge,
+                     "rank": e.get("kom_rank") or e.get("pr_rank") or 99})
+    segs.sort(key=lambda s: (s["badge"] is None, s["rank"]))
+    out["segments"] = segs
+    out["details_loaded"] = bool(detail)
+    return out
 
 
 # ---------------------------------------------------------------------------
